@@ -4,7 +4,11 @@ import unicodedata
 import re
 import io
 
-# Fonction de nettoyage des caractères (majuscules, accents, espaces...)
+# ==========================================
+# FONCTIONS OUTILS
+# ==========================================
+
+# 1. Nettoyage des caractères (majuscules, accents, espaces...)
 def normalize_string(text):
     if pd.isna(text) or str(text).strip() == "":
         return ""
@@ -14,7 +18,31 @@ def normalize_string(text):
     text = re.sub(r'[\s\-_]', '', text)
     return text
 
-# Configuration de la page web
+# 2. Mise en couleur des doublons pour l'export Excel
+def coloriser_doublons(df, colonne_id='ID_Groupe_Doublon'):
+    if df.empty:
+        return df
+    
+    # On récupère tous les ID de groupes (ex: Groupe P1-1, Groupe P1-2)
+    groupes = df[colonne_id].unique()
+    
+    # On choisit deux couleurs pastel (Bleu très clair et Jaune très clair)
+    couleurs = ['#E8F4F8', '#FFF8DC'] 
+    
+    # On attribue à chaque groupe une des deux couleurs en alternance
+    mapping_couleurs = {g: couleurs[i % len(couleurs)] for i, g in enumerate(groupes)}
+    
+    # Fonction qui va peindre toute la ligne de la même couleur
+    def colorer_ligne(row):
+        couleur = mapping_couleurs.get(row[colonne_id], '')
+        return [f'background-color: {couleur}'] * len(row)
+        
+    # On applique ce style au DataFrame
+    return df.style.apply(colorer_ligne, axis=1)
+
+# ==========================================
+# CONFIGURATION DE LA PAGE
+# ==========================================
 st.set_page_config(page_title="Vérificateur de Doublons", layout="centered")
 st.title("🛠️ Outil de Vérification P1 & Fournisseurs")
 st.write("Déposez votre fichier Excel. L'outil détectera automatiquement les onglets, **peu importe s'ils sont écrits en majuscules ou minuscules**.")
@@ -132,7 +160,7 @@ if file_excel:
                     df_report = pd.DataFrame(duplicates)
 
                     # --- 5. Création des DataFrames des lignes complètes ---
-                    # On place la colonne ID_Groupe en premier pour que ce soit super lisible
+                    # On place la colonne ID_Groupe en premier
                     cols_p1 = ['ID_Groupe_Doublon'] + [c for c in df_p1.columns if c not in ['ID_Groupe_Doublon', 'K_Norm', 'L_Original', 'Fabricant_Compare']]
                     df_p1_lignes_completes = df_p1.loc[indices_doublons_p1, cols_p1]
 
@@ -140,7 +168,8 @@ if file_excel:
                     df_fournisseurs_lignes_completes = df_fournisseurs.loc[indices_doublons_fourn, cols_f]
 
                     # --- 6. Génération des fichiers Excel en mémoire ---
-                    # Fichier 1 : Rapport Synthétique
+                    
+                    # Fichier 1 : Rapport Synthétique (Sans couleurs)
                     output_synthese = io.BytesIO()
                     with pd.ExcelWriter(output_synthese, engine='openpyxl') as writer:
                         df_report.to_excel(writer, sheet_name='1 - Doublons Equipements', index=False)
@@ -149,12 +178,18 @@ if file_excel:
                         if not df_orphelins.empty:
                             df_orphelins.to_excel(writer, sheet_name='3 - Orphelins P1', index=False)
                             
-                    # Fichier 2 : Lignes Complètes brutes
+                    # Fichier 2 : Lignes Complètes brutes (AVEC COULEURS)
                     output_details = io.BytesIO()
                     with pd.ExcelWriter(output_details, engine='openpyxl') as writer2:
-                        df_p1_lignes_completes.to_excel(writer2, sheet_name='Doublons_P1_Lignes_Completes', index=False)
+                        
+                        # On colore l'onglet P1
+                        df_p1_colore = coloriser_doublons(df_p1_lignes_completes)
+                        df_p1_colore.to_excel(writer2, sheet_name='Doublons_P1_Lignes_Completes', index=False)
+                        
+                        # On colore l'onglet Fournisseurs s'il y en a
                         if not df_fournisseurs_lignes_completes.empty:
-                            df_fournisseurs_lignes_completes.to_excel(writer2, sheet_name='Doublons_Fourn_Lignes_Completes', index=False)
+                            df_f_colore = coloriser_doublons(df_fournisseurs_lignes_completes)
+                            df_f_colore.to_excel(writer2, sheet_name='Doublons_Fourn_Lignes_Completes', index=False)
 
                     # Affichage des résultats
                     st.success(f"✅ Analyse terminée ! {len(df_report)} groupes de doublons trouvés.")
@@ -173,9 +208,9 @@ if file_excel:
                         
                     with col2:
                         st.download_button(
-                            label="🔍 Télécharger Lignes Complètes (Détails)",
+                            label="🎨 Télécharger Lignes Complètes (Colorées)",
                             data=output_details.getvalue(),
-                            file_name="Lignes_Completes_Doublons.xlsx",
+                            file_name="Lignes_Completes_Doublons_Colorees.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True
                         )
